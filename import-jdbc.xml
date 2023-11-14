@@ -1,0 +1,580 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE sailpoint PUBLIC "sailpoint.dtd" "sailpoint.dtd">
+<sailpoint>
+<Rule language="beanshell" name="JDBCGlobalRule" type="JDBCProvision">
+  <Description>This rule is used by the JDBC connector to do provisioning of the data .</Description>
+  <Signature returnType="ProvisioningResult">
+    <Inputs>
+      <Argument name="log" type="org.apache.commons.logging.Log">
+        <Description>
+          The log object associated with the SailPointContext.
+        </Description>
+      </Argument>
+      <Argument name="context" type="sailpoint.api.SailPointContext">
+        <Description>
+          A sailpoint.api.SailPointContext object that can be used to query the database if necessary.
+        </Description>
+      </Argument>
+      <Argument name="application">
+        <Description>
+                The application whose data file is being processed.
+                </Description>
+      </Argument>
+      <Argument name="schema">
+        <Description>
+                The Schema currently in use.
+                </Description>
+      </Argument>
+      <Argument name="connection">
+        <Description>
+                A connection object to connect to database.
+                </Description>
+      </Argument>
+      <Argument name="plan">
+        <Description>
+                The ProvisioningPlan created against the JDBC application.
+                </Description>
+      </Argument>
+    </Inputs>
+    <Returns>
+      <Argument name="result">
+        <Description>
+                A Provisioning Result object is desirable to return the status.IT can be a new object or part of  Provisioning Plan
+                </Description>
+      </Argument>
+    </Returns>
+  </Signature>
+  <Source>
+import sailpoint.object.*;
+import java.sql.ResultSet;
+import java.sql.Connection;
+import sailpoint.api.SailPointContext;  
+import sailpoint.object.ProvisioningPlan;
+import sailpoint.object.ProvisioningPlan.AccountRequest;
+import sailpoint.object.ProvisioningPlan.AttributeRequest;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import sailpoint.object.ProvisioningResult;
+  
+if(plan != null){
+  int groupId;
+	String FirstName;
+	String LastName;
+	String Department;
+	String EmployeeID;
+	String EmailAddress;
+	String Name;
+	String NetworkID;
+	String ManagerID;
+  String temp;
+
+	List groupName = new ArrayList();
+  List groupNamesList = new ArrayList();
+  List groupIdList = new ArrayList();
+  
+	List accReqs = plan.getAccountRequests();
+		for(int i=0; i&lt;accReqs.size();i++){
+			AccountRequest accReq = accReqs.get(i);
+			ProvisioningPlan.AccountRequest.Operation op = accReq.getOperation();
+      
+			//Create Operation
+			if(op != null &amp;&amp; accReq.getOperation().equals(AccountRequest.Operation.Create)){
+				List attReqs = accReq.getAttributeRequests();
+				for(int j=0;j&lt;attReqs.size();j++){
+					AttributeRequest attReq = attReqs.get(j);
+						if(attReq.getName().equalsIgnoreCase("FirstName")){
+							FirstName =  attReq.getValue();
+            }else if(attReq.getName().equalsIgnoreCase("LastName")){
+							LastName = attReq.getValue();
+						}else if(attReq.getName().equalsIgnoreCase("Department")){
+							Department= attReq.getValue();
+						}else if(attReq.getName().equalsIgnoreCase("EmployeeID")){
+							EmployeeID= attReq.getValue();
+						}else if(attReq.getName().equalsIgnoreCase("EmailAddress")){
+							EmailAddress= attReq.getValue();
+						}else if(attReq.getName().equalsIgnoreCase("Name")){
+							Name= attReq.getValue();
+						}else if(attReq.getName().equalsIgnoreCase("NetworkID")){
+							NetworkID= attReq.getValue();
+						}else if(attReq.getName().equalsIgnoreCase("ManagerID")){
+							ManagerID= attReq.getValue();
+						}else if(attReq.getName().equalsIgnoreCase("GroupName")){
+							Object obj = attReq.getValue();
+              groupNamesList.add(obj);
+              
+              String grouIdQuery = "SELECT gid FROM jdbc.jdbc_groups_data where GroupName ='" + obj +"'";
+        			preparedStatement = connection.prepareStatement(grouIdQuery);
+        			resultSet = preparedStatement.executeQuery();
+              
+        			if(resultSet.next()) {
+        				groupId = resultSet.getInt(1);
+                groupIdList.add(groupId);
+        			} 
+              if(obj instanceof String){
+                temp = attReq.getValue();
+              }else if (obj instanceof List){
+                groupName = groupName.addAll(attReq.getValue());
+              }
+						}
+				}
+				String users_query = "insert into jdbc.jdbc_user_data(id, Name, FirstName, LastName, Department, EmployeeID, EmailAddress, NetworkID, managerID) values(?,?,?,?,?,?,?,?,?)";
+				PreparedStatement users_query_statement = connection.prepareStatement(users_query);
+          
+        String query1 = "SELECT MAX(id) FROM jdbc.jdbc_user_data";
+        preparedStatement = connection.prepareStatement(query1);
+        resultSet = preparedStatement.executeQuery();
+        
+        int maxId = 0;
+        if(resultSet.next()) {
+        	maxId = resultSet.getInt(1);
+        }
+				int userId = maxId + 1;
+        users_query_statement.setInt(1,userId);
+        users_query_statement.setString(2, accReq.getNativeIdentity());
+				users_query_statement.setString(3,FirstName);
+				users_query_statement.setString(4,LastName);
+				users_query_statement.setString(5,Department);
+				users_query_statement.setString(6,EmployeeID);
+				users_query_statement.setString(7,EmailAddress);
+				users_query_statement.setString(8,NetworkID);
+				users_query_statement.setString(9,ManagerID);
+				users_query_statement.executeUpdate();
+                
+        for(int k=0; k&lt;groupNamesList.size();k++){          
+          String users_groups_data_query = "insert into jdbc.jdbc_user_groups_data(usersid, groupid) values(?,?)";
+        	PreparedStatement users_groups_data_query_statement = connection.prepareStatement(users_groups_data_query);
+        
+        	users_groups_data_query_statement.setInt(1,userId);
+        	users_groups_data_query_statement.setInt(2,groupIdList.get(k));
+        	users_groups_data_query_statement.executeUpdate();
+        }
+        connection.close();
+        
+        System.out.println("Account Created Successfully.......!");
+			}
+      //Modify Operation
+      else if(AccountRequest.Operation.Modify.equals(accReq.getOperation())){
+        
+        String nativeIdentity;
+        List modifyGroupNamesList = new ArrayList();
+  			List modifyGroupIdList = new ArrayList();
+        
+        
+        List attReqs = accReq.getAttributeRequests();
+				for(int j=0;j&lt;attReqs.size();j++){
+          
+					AttributeRequest attReq = attReqs.get(j);
+          
+          System.out.println("attReq is &gt;&gt;&gt;&gt; " + attReq);
+          
+          nativeIdentity = accReq.getNativeIdentity();   
+          
+         
+           System.out.println("nativeIdentity is &gt;&gt;&gt;&gt; " + nativeIdentity);
+          
+          if(attReq.getName().equalsIgnoreCase("GroupName")){
+            //Add Operation            
+            if(ProvisioningPlan.Operation.Add.equals(attReq.getOperation())){
+              System.out.println("Add Operation");
+              
+              String groupName = attReq.getValue();
+            	System.out.println("groupName is &gt;&gt;&gt;&gt; " + groupName);
+          		modifyGroupNamesList.add(groupName);
+              System.out.println("modifyGroupNamesList.......! First---&gt;&gt;" + modifyGroupNamesList);
+
+              String grouIdQuery = "SELECT gid FROM jdbc.jdbc_groups_data where GroupName ='" + groupName +"'";
+              PreparedStatement grouIdQueryStatement = connection.prepareStatement(grouIdQuery);
+              resultSet = grouIdQueryStatement.executeQuery();
+
+              if(resultSet.next()) {
+                groupId = resultSet.getInt(1);
+                modifyGroupIdList.add(groupId);
+                System.out.println("modifyGroupIdList.......! First---&gt;&gt;" + modifyGroupIdList);
+              } 
+
+              String employeeIdQuery = "select id from jdbc.jdbc_user_data where Name ='" + nativeIdentity +"'";
+              PreparedStatement employeeIdQueryStatement = connection.prepareStatement(employeeIdQuery);
+              resultSet = employeeIdQueryStatement.executeQuery();
+
+              int id;
+              if(resultSet.next()) {
+                id = resultSet.getInt(1);
+              }
+
+              for(int k=0; k&lt;modifyGroupNamesList.size();k++){
+                String users_groups_data_query = "insert into jdbc.jdbc_user_groups_data(usersid, groupid) values(?,?)";
+                PreparedStatement users_groups_data_query_statement = connection.prepareStatement(users_groups_data_query);
+
+                users_groups_data_query_statement.setInt(1,id);
+                users_groups_data_query_statement.setInt(2,modifyGroupIdList.get(k));
+                users_groups_data_query_statement.executeUpdate();
+
+              }	
+              System.out.println("Entitlement is Added Successfully.......!");
+            }
+            
+            //Remove Operation                                    
+             	if(ProvisioningPlan.Operation.Remove.equals(attReq.getOperation())){
+                System.out.println("Remove Operation");
+                
+                String groupName = attReq.getValue();
+                System.out.println("groupName is &gt;&gt;&gt;&gt; " + groupName);
+                modifyGroupNamesList.add(groupName);
+                System.out.println("modifyGroupNamesList.......! First---&gt;&gt;" + modifyGroupNamesList);
+
+                String grouIdQuery = "SELECT gid FROM jdbc.jdbc_groups_data where GroupName ='" + groupName +"'";
+                PreparedStatement grouIdQueryStatement = connection.prepareStatement(grouIdQuery);
+                resultSet = grouIdQueryStatement.executeQuery();
+
+                if(resultSet.next()) {
+                  groupId = resultSet.getInt(1);
+                  modifyGroupIdList.add(groupId);
+                  System.out.println("modifyGroupIdList.......! First---&gt;&gt;" + modifyGroupIdList);
+                }
+                                
+                for(int k=0; k&lt;modifyGroupNamesList.size();k++){
+                  String delete_users_groups_data_query = "delete from  jdbc.jdbc_user_groups_data  where groupid = ?";
+                  PreparedStatement delete_users_groups_data_query_statement = connection.prepareStatement(delete_users_groups_data_query);
+                  delete_users_groups_data_query_statement.setInt(1,modifyGroupIdList.get(k));
+                  delete_users_groups_data_query_statement.executeUpdate();
+        				}
+                System.out.println("Entitlement is Removed Successfully.......!");
+            	}
+            
+        		connection.close();
+            System.out.println("modifyGroupNamesList.......! Last ---&gt;&gt;" + modifyGroupNamesList);
+            System.out.println("modifyGroupIdList.......! Last---&gt;&gt;" + modifyGroupIdList);
+          } 
+        } 
+			}
+      //Delete Operation
+      else if(AccountRequest.Operation.Delete.equals(attReq.getOperation())){
+            String nativeIdentity;  
+            nativeIdentity = accReq.getNativeIdentity();
+        
+            String employeeIdQuery = "select id from jdbc.jdbc_user_data where Name ='" + nativeIdentity +"'";
+            preparedStatement = connection.prepareStatement(employeeIdQuery);
+        		resultSet = preparedStatement.executeQuery();
+        
+        
+        		int id;
+        		if(resultSet.next()) {
+        			id = resultSet.getInt(1);
+        		}
+          		String users_groups_data_query = "delete from jdbc.jdbc_user_groups_data where usersid = ? ";
+        			PreparedStatement users_groups_data_query_statement = connection.prepareStatement(users_groups_data_query);
+        			users_groups_data_query_statement.setInt(1,id);
+        			users_groups_data_query_statement.executeUpdate();
+           
+              String users_data_query = "delete from jdbc.jdbc_user_data where id = ? ";
+        			PreparedStatement users_data_query_statement = connection.prepareStatement(users_data_query);
+        			users_data_query_statement.setInt(1,id);
+        			users_data_query_statement.executeUpdate();
+        			
+        		connection.close();
+        
+        System.out.println("Account is Deleted Successfully.......!");
+        } 
+			}
+  }
+  
+  System.out.println("Final Plan is Printed Check Once....!! " + plan.toXml());
+  </Source>
+</Rule>
+<Application connector="sailpoint.connector.JDBCConnector" featuresString="DISCOVER_SCHEMA, PROVISIONING, SYNC_PROVISIONING, DIRECT_PERMISSIONS, SEARCH, ENABLE, UNLOCK" icon="databaseIcon" name="JDBC" profileClass="" type="JDBC">
+  <Attributes>
+    <Map>
+      <entry key="Groups.SQL" value="SELECT * FROM jdbc.jdbc_groups_data;"/>
+      <entry key="Groups.aggregationMode">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="Groups.deltaTable"/>
+      <entry key="Groups.driverClass" value="com.mysql.cj.jdbc.Driver"/>
+      <entry key="Groups.getDeltaSQL"/>
+      <entry key="Groups.getDirectPermObjectSQL"/>
+      <entry key="Groups.getObjectSQL"/>
+      <entry key="Groups.isPermissionEnabled">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="Groups.mergeRows">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="Groups.password" value="1:ACP:SeQCe2eExbvJxPgGEP4z0DRYpQDnBWwxsTnIp/GI348="/>
+      <entry key="Groups.url" value="jdbc:mysql://localhost:3306/jdbc"/>
+      <entry key="Groups.useExecuteQuery">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="Groups.useStoredProcedureDelta">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="Groups.useStoredProcedureDirectPermission">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="Groups.useStoredProcedureGetObject">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="Groups.useStoredProcedureSqlStmt">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="Groups.user" value="root"/>
+      <entry key="SQL" value="SELECT  Name, FirstName, LastName, Department, EmployeeID, EmailAddress, NetworkID, managerID , GroupName from&#13;&#10; jdbc_user_data a, jdbc_groups_data b , jdbc_user_groups_data c   where a.id=c.usersid and b.gid = c.groupid order by Name;"/>
+      <entry key="acctAggregationEnd">
+        <value>
+          <Date>1692363474278</Date>
+        </value>
+      </entry>
+      <entry key="acctAggregationStart">
+        <value>
+          <Date>1692363470570</Date>
+        </value>
+      </entry>
+      <entry key="afterProvisioningRule"/>
+      <entry key="aggregationMode">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="beforeProvisioningRule" value="JDBCBP"/>
+      <entry key="compositeDefinition"/>
+      <entry key="connMaxRetry" value="3"/>
+      <entry key="connRetryEnable">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="connWaitTimeForRetry" value="2"/>
+      <entry key="deltaTable"/>
+      <entry key="driverClass" value="com.mysql.cj.jdbc.Driver"/>
+      <entry key="getDeltaSQL"/>
+      <entry key="indexColumns">
+        <value>
+          <List>
+            <String>Name</String>
+          </List>
+        </value>
+      </entry>
+      <entry key="isPermissionEnabled">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="jdbcExceptionBucketing">
+        <value>
+          <Boolean>true</Boolean>
+        </value>
+      </entry>
+      <entry key="jdbcProvisionRule" value="JDBCGlobalRule"/>
+      <entry key="mergeColumns">
+        <value>
+          <List>
+            <String>GroupName</String>
+          </List>
+        </value>
+      </entry>
+      <entry key="mergeRows">
+        <value>
+          <Boolean>true</Boolean>
+        </value>
+      </entry>
+      <entry key="nativeChangeDetectionAttributeScope" value="entitlements"/>
+      <entry key="nativeChangeDetectionAttributes"/>
+      <entry key="nativeChangeDetectionEnabled">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="nativeChangeDetectionOperations"/>
+      <entry key="noPermissions" value="false"/>
+      <entry key="operations" value="Create, Modify, Delete, Enable, Disable, Unlock"/>
+      <entry key="partitionMode">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="partitionStatements"/>
+      <entry key="password" value="1:ACP:SeQCe2eExbvJxPgGEP4z0DRYpQDnBWwxsTnIp/GI348="/>
+      <entry key="provisionRule" value="globalRule"/>
+      <entry key="sysDescriptions">
+        <value>
+          <Map>
+            <entry key="en_US"/>
+          </Map>
+        </value>
+      </entry>
+      <entry key="templateApplication" value="JDBC Template"/>
+      <entry key="testConnSQL"/>
+      <entry key="url" value="jdbc:mysql://localhost:3306/jdbc"/>
+      <entry key="useExecuteQuery">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="useStoredProcedureDelta">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="useStoredProcedureDirectPermission">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="useStoredProcedureGetObject">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="useStoredProcedurePartition">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="useStoredProcedureSqlStmt">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="useStoredProcedureTestConn">
+        <value>
+          <Boolean/>
+        </value>
+      </entry>
+      <entry key="user" value="root"/>
+    </Map>
+  </Attributes>
+  <Owner>
+    <Reference class="sailpoint.object.Identity" name="spadmin"/>
+  </Owner>
+  <ProvisioningForms>
+    <Form name="Account" objectType="account" type="Create">
+      <Attributes>
+        <Map>
+          <entry key="pageTitle" value="Account"/>
+        </Map>
+      </Attributes>
+      <Section name="Account">
+        <Field name="FirstName" type="string">
+          <Script>
+            <Source>return identity.getFirstname();</Source>
+          </Script>
+        </Field>
+        <Field name="LastName" type="string">
+          <Script>
+            <Source>return identity.getLastname();</Source>
+          </Script>
+        </Field>
+        <Field name="EmailAddress" type="string">
+          <Script>
+            <Source>return identity.getEmail();</Source>
+          </Script>
+        </Field>
+        <Field name="Department" type="string">
+          <Script>
+            <Source>return identity.getAttribute("Department");</Source>
+          </Script>
+        </Field>
+        <Field name="EmployeeID" type="string">
+          <Script>
+            <Source>return identity.getAttribute("empID");</Source>
+          </Script>
+        </Field>
+        <Field name="NetworkID" type="string">
+          <Script>
+            <Source>return identity.getAttribute("networkID");</Source>
+          </Script>
+        </Field>
+        <Field name="managerID" type="string">
+          <Script>
+            <Source>return identity.getAttribute("manager");</Source>
+          </Script>
+        </Field>
+        <Field name="Name" type="string">
+          <Script>
+            <Source>return identity.getDisplayName();</Source>
+          </Script>
+        </Field>
+      </Section>
+      <Section name="Group">
+        <Field name="GroupName" type="string">
+          <Script>
+            <Source>return identity.getAttribute("GroupName");</Source>
+          </Script>
+        </Field>
+      </Section>
+    </Form>
+  </ProvisioningForms>
+  <Schemas>
+    <Schema displayAttribute="Name" identityAttribute="Name" instanceAttribute="" nativeObjectType="account" objectType="account" permissionsRemediationModificationType="None">
+      <AttributeDefinition name="Name" type="string">
+        <Description/>
+      </AttributeDefinition>
+      <AttributeDefinition name="FirstName" type="string">
+        <Description/>
+      </AttributeDefinition>
+      <AttributeDefinition name="LastName" type="string">
+        <Description/>
+      </AttributeDefinition>
+      <AttributeDefinition name="Department" type="string">
+        <Description/>
+      </AttributeDefinition>
+      <AttributeDefinition name="EmployeeID" type="string">
+        <Description/>
+      </AttributeDefinition>
+      <AttributeDefinition name="EmailAddress" type="string">
+        <Description/>
+      </AttributeDefinition>
+      <AttributeDefinition name="NetworkID" type="string">
+        <Description/>
+      </AttributeDefinition>
+      <AttributeDefinition name="managerID" type="string">
+        <Description/>
+      </AttributeDefinition>
+      <AttributeDefinition entitlement="true" managed="true" multi="true" name="GroupName" schemaObjectType="Groups" type="string">
+        <Description/>
+      </AttributeDefinition>
+    </Schema>
+    <Schema aggregationType="group" descriptionAttribute="" displayAttribute="GroupName" identityAttribute="GroupName" instanceAttribute="" nativeObjectType="Groups" objectType="Groups" permissionsRemediationModificationType="None">
+      <AttributeDefinition name="gid" type="string">
+        <Description/>
+      </AttributeDefinition>
+      <AttributeDefinition name="GroupName" type="string">
+        <Description/>
+      </AttributeDefinition>
+      <AttributeDefinition name="GroupCategory" type="string">
+        <Description/>
+      </AttributeDefinition>
+    </Schema>
+  </Schemas>
+  <ApplicationScorecard>
+    <Attributes>
+      <Map>
+        <entry key="dormantAccount" value="0"/>
+        <entry key="inactiveAccount" value="0"/>
+        <entry key="privilegedAccount" value="0"/>
+        <entry key="riskyAccount" value="0"/>
+        <entry key="serviceAccount" value="0"/>
+        <entry key="totalEntitlements" value="8"/>
+        <entry key="totalLinks" value="8"/>
+        <entry key="violatorAccount" value="0"/>
+      </Map>
+    </Attributes>
+  </ApplicationScorecard>
+</Application>
+
+</sailpoint>
